@@ -137,7 +137,7 @@ if __name__ == '__main__':
 
     result = demo(opt)
 
-    with open('poems_all_topic.csv', 'r', encoding="utf-8") as file:
+    with open('data/poems_all_topic.csv', 'r', encoding="utf-8") as file:
         reader = csv.reader(file)
         topic = []
         all_topic = []
