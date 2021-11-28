@@ -169,7 +169,12 @@ if __name__ == '__main__':
             similarity[i] = max(inner_sim.values())
 
         max_topic = max(similarity, key=lambda k: similarity[k])
-        ##TODO: call model based on max topic
+
+        query_list = []
+        for synonym in wn.synsets(max_topic,wn.NOUN):
+            for item in synonym.lemmas():
+                query_list.append(item.name())
+        ##TODO: call model based on query list
 
         print("image predict: " + pred_topic+ ", Most related topic: " + max_topic)
 
