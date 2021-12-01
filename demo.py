@@ -176,7 +176,7 @@ if __name__ == '__main__':
                 query_list.append(item.name())
         ##TODO: call model based on query list
 
-        print("image predict: " + pred_topic+ ", Most related topic: " + max_topic)
+        print("image predict: " + pred_topic+ ", Most related topic: " + max_topic + ", synonym: " + str(query_list))
 
 
 
