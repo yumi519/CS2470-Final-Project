@@ -6,12 +6,12 @@ import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 from scipy import spatial
 from collections import Counter
-import keras.backend as K
-from keras.models import Model
+import tensorflow.keras.backend as K
+from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam, SGD
-from keras.preprocessing.text import Tokenizer
-from keras.preprocessing.sequence import pad_sequences
-from keras.layers import Dense, Embedding, Input, LSTM, GRU
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Dense, Embedding, Input, LSTM, GRU
 
 import matplotlib.pyplot as plt
 # Input data files are available in the "../input/" directory.
@@ -27,13 +27,13 @@ ds_path = "data/"
 glove_path = "data/glove.6B.%dd.txt"
 
 # read the poems dataset
-poems_df = pd.read_csv(os.path.join(ds_path, "poems_all_topic.csv"))
+poems_df = pd.read_csv(os.path.join(ds_path, "poems_all_topic.csv"),encoding='windows-1252')
 poems_df.head(2)
 # groupby the Author and print the count of number of poems written by each of them
 #poems_df.groupby("Author").agg({"Content": "count"}).sort_values("Content", ascending=False).head(5)
 
 # since Shakespeare has the most poems I am using that for training our model
-william_poems = poems_df[0:1000]
+william_poems = poems_df[0:12000]
 #second_topic = poems_df[poems_df["Topic"] == "happy"]
 #third_topic = poems_df[poems_df["Topic"] == "happy"]
 print("Some of the lines are: ")
@@ -109,7 +109,7 @@ class SequenceGenerator():
 
         # load the word embeddings
         self.word2vec = {}
-        with open(glove_path % self.EMBEDDING_DIM, 'r') as file:
+        with open(glove_path % self.EMBEDDING_DIM, 'r',encoding='utf-8') as file:
             for line in file:
                 vectors = line.split()
                 self.word2vec[vectors[0]] = np.asarray(vectors[1:], dtype="float32")
