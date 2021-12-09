@@ -1,9 +1,10 @@
-#Poetry Generator with Text Image
-#Team members: Sophia Song(xsong2), Yuming Fu(yfu49), Yongxuan Fu(yfu13)
+Poetry Generator with Text Image
 
-#Team Name: The Powerpuff Girls
+Team members: Sophia Song(xsong2), Yuming Fu(yfu49), Yongxuan Fu(yfu13)
 
-#Getting Started
+Team Name: The Powerpuff Girls
+
+Getting Started
 
 Download Glove for poem generate model:
 1. Download glove.6B.200d.txt from https://drive.google.com/file/d/1ZNNQuy-dBQ7sLfAOs198dcnBq55CPQtv/view
