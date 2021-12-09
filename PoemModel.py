@@ -1,12 +1,20 @@
 # This Python 3 environment comes with many helpful analytics libraries installed
 # It is defined by the kaggle/python docker image: https://github.com/kaggle/docker-python
 # For example, here's several helpful packages to load in
-
+import argparse
+import beam
+import csv
+import nltk
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import torch
+import gensim
+from gensim.models import Word2Vec
+from nltk.corpus import wordnet as wn
 from scipy import spatial
 from collections import Counter
 import tensorflow.keras.backend as K
+from tensorflow import string
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -18,6 +26,12 @@ import matplotlib.pyplot as plt
 # For example, running this (by clicking run or pressing Shift+Enter) will list all files under the input directory
 
 import os
+
+from torch.backends import cudnn
+from tqdm import tqdm
+
+from demo import demo
+
 for dirname, _, filenames in os.walk('/kaggle/input'):
     for filename in filenames:
         print(os.path.join(dirname, filename))
@@ -27,49 +41,13 @@ ds_path = "data/"
 glove_path = "data/glove.6B.%dd.txt"
 
 # read the poems dataset
+'''
 poems_df = pd.read_csv(os.path.join(ds_path, "poems_all_topic.csv"),encoding='windows-1252')
 poems_df.head(2)
 # groupby the Author and print the count of number of poems written by each of them
 #poems_df.groupby("Author").agg({"Content": "count"}).sort_values("Content", ascending=False).head(5)
+'''
 
-# since Shakespeare has the most poems I am using that for training our model
-william_poems = poems_df[0:12000]
-#second_topic = poems_df[poems_df["Topic"] == "happy"]
-#third_topic = poems_df[poems_df["Topic"] == "happy"]
-print("Some of the lines are: ")
-print(william_poems.iloc[0, 1].split('. '))
-poems_combined = ""
-for line in william_poems.iloc[:, 1]:
-    sub_line = line.split(". ")
-    for innerLine in sub_line:
-        poems_combined += innerLine+"\n"
-#poems_combined = "\n".join(william_poems.iloc[:, 1].split('. '))
-# combine all the poems by seperating them with \n
-#poems_combined = "\n".join(william_poems.iloc[:, 1].values)
-print("Total number of characters: ", len(poems_combined))
-
-# now we will be splitting the entire document into lines
-poem_lines = poems_combined.split('\n')
-print("Number of lines in the dataset: ", len(poem_lines))
-
-# prepare the input and target lines
-input_lines = ["<sos> "+line for line in poem_lines] # in each of the input we add <sos> token idicating the begining of a line
-target_lines = [line+ " <eos>" for line in poem_lines] # while target lines are appended with with <eos> token indicating end of the line
-
-
-# 2. Tokenize words
-# 3. Prepare Word Embedding
-# there could be lines having a lot of words in them. But since we have to define the length of the sequene before hand
-# and we already know that LSTM/GRU are slow due to their sequential nature, we will try to keep the sequence length as small as possible
-
-# so, in the below snippet, we are calculating the frequencies of different sequence lengths
-tokenized_lines = map(str.split, input_lines)
-len_of_lines = map(len, tokenized_lines)
-len_frequencies = Counter(list(len_of_lines))
-
-
-# output the frequencies
-sorted(len_frequencies.items())
 
 EPOCHS = 10 # number of times the model is trained on the entire training dataset
 BATCH_SIZE = 16 # number of data points to consider to train at a single point of time
@@ -79,16 +57,12 @@ MAX_VOCAB_SIZE = 100000 # the maximum number of words to consider
 VALIDATION_SPLIT = 0.2 # % of validation dataset
 
 
-# the process to get the word embeddings and tokenize the sentences is a repeatable part
-# hence, I've created a class for easy management across the projects
-
 class SequenceGenerator():
 
     # takes as input an input and output sequence
     def __init__(self, input_lines, target_lines, max_seq_len=None, max_vocab_size=100000, embedding_dim=200):
         """
             This is a class constructor.
-
             Parameters:
                 input_lines (list): list of input sentences
                 target_lines (list): list of target sentences
@@ -130,7 +104,6 @@ class SequenceGenerator():
         """
             Initialize a tokenizer and train it on the input and target sentences.
             Also, it prepares the sequences by tokenizing and padding the sequences.
-
             Parameters:
                 filters (str): mentioned characters in the list are removed from the sentences
         """
@@ -179,10 +152,8 @@ class SequenceGenerator():
         """
             Find the nearest word to the provided vector. The distance between the vectors is
             calculated using the cosine-distance.
-
             Parameters:
                 word_vec (np.array): a vector of size EMBEDDING_DIM
-
             Returns:
                 Str: the closest word to the provided vector
         """
@@ -206,13 +177,10 @@ class SequenceGenerator():
 def get_context(sequences, query_word):
     """
         This function takes as input multiple lines generated by the model so far and a query_word or the theme of the poem.
-
         So, the approach is we will add the embeddings of all the words in a sentence to get the sentence embeddings and will
         create the sentence embeddings for all the sentences created so far.
-
         Now, to summarize all the sentence embeddings into a single vector, we will calculate the distance of all the sentence
         from the query_word. These weights are normalized and will be used as the weights to combine the sentence embeddings.
-
         This final embedding vector or the context will be passed to the Decoder as a hidden state and a new line is generated from it.
     """
 
@@ -254,7 +222,6 @@ def get_context(sequences, query_word):
 def get_sample_line(context):
     """
         Get a single line using the provided context as a hidden state
-
         Parameters:
             context (np.array): generated context of the same size as the word_embedding
     """
@@ -311,6 +278,123 @@ def get_sample_line(context):
 
 # create an object of the class
 if __name__=='__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--image_folder', required=True, help='path to image_folder which contains text images')
+    parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+    parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
+    parser.add_argument('--saved_model', required=True, help="path to saved_model to evaluation")
+    """ Data processing """
+    parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
+    parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
+    parser.add_argument('--imgW', type=int, default=100, help='the width of the input image')
+    parser.add_argument('--rgb', action='store_true', help='use rgb input')
+    parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
+    parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
+    parser.add_argument('--PAD', action='store_true', help='whether to keep ratio then pad for image resize')
+    """ Model Architecture """
+    parser.add_argument('--Transformation', type=str, required=True, help='Transformation stage. None|TPS')
+    parser.add_argument('--FeatureExtraction', type=str, required=True, help='FeatureExtraction stage. VGG|RCNN|ResNet')
+    parser.add_argument('--SequenceModeling', type=str, required=True, help='SequenceModeling stage. None|BiLSTM')
+    parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
+    parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
+    parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
+    parser.add_argument('--output_channel', type=int, default=512,
+                        help='the number of output channel of Feature extractor')
+    parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
+
+    opt = parser.parse_args()
+
+    """ vocab / character number configuration """
+    if opt.sensitive:
+        opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
+
+    cudnn.benchmark = True
+    cudnn.deterministic = True
+    opt.num_gpu = torch.cuda.device_count()
+
+    result = demo(opt)
+
+    with open('data/poems_all_topic.csv', 'r', encoding='windows-1252') as file:  # used to be UTF-8
+        reader = csv.reader(file)
+        topic = []
+        all_topic = []
+        for row in reader:
+            if row[0] not in topic:
+                topic.append(row[0])
+                all_topic.append(row[0])
+    nltk.download('wordnet')
+    ##TODO: key是topic，value是他的pretrain_model_path
+    for image_name, pred_topic in result.items():
+        all_topic.append(pred_topic)
+        for synonym in wn.synsets(pred_topic, wn.NOUN):
+            for item in synonym.lemmas():
+                all_topic.append(item.name())
+
+    pretrain_model_path = dict()
+
+    Word2Vec_model = gensim.models.Word2Vec([all_topic], min_count=1, window=2)
+
+    #image_name, pred_topic = result.items()[0] # changed
+    for image_name, pred_topic in result.items():
+        similarity = dict()
+        for i in topic:
+            inner_sim = dict()
+            inner_sim[pred_topic] = Word2Vec_model.wv.similarity(pred_topic, i)
+            for synonym in wn.synsets(pred_topic, wn.NOUN):
+                for item in synonym.lemmas():
+                    inner_sim[item.name()] = Word2Vec_model.wv.similarity(item.name(), i)
+            similarity[i] = max(inner_sim.values())
+
+        max_topic = max(similarity, key=lambda k: similarity[k]) # we will use that later
+    '''
+        query_list = []
+        for synonym in wn.synsets(max_topic, wn.NOUN):
+            for item in synonym.lemmas():
+                query_list.append(item.name())
+        ##TODO: call model based on query list
+
+        print("image predict: " + pred_topic + ", Most related topic: " + max_topic + ", synonym: " + str(query_list))
+        '''
+    ###################
+    poems_df = pd.read_csv(os.path.join(ds_path, "poems_all_topic.csv"), encoding='utf-8')
+    topic_poems = poems_df[poems_df["Topic"] == max_topic].iloc[:, 1]
+    shakespeare_poems = poems_df[poems_df["Topic"] == "Williams Shakespeare"].iloc[:, 1]
+    curr_poems = []
+    for poem in topic_poems:
+        curr_poems.append(poem)
+    for poem in shakespeare_poems:
+        curr_poems.append(poem)
+    poems_combined = ""
+    for line in curr_poems:
+        for sub_line in line:
+            sentences = sub_line.split(". ")
+            for sentence in sentences:
+                poems_combined += sentence + "\n"
+    print("Total number of characters: ", len(poems_combined))
+
+    # now we will be splitting the entire document into lines
+    poem_lines = poems_combined.split('\n')
+    print("Number of lines in the dataset: ", len(poem_lines))
+
+    # prepare the input and target lines
+    input_lines = ["<sos> " + line for line in
+                   poem_lines]  # in each of the input we add <sos> token idicating the begining of a line
+    target_lines = [line + " <eos>" for line in
+                    poem_lines]  # while target lines are appended with with <eos> token indicating end of the line
+
+    # 2. Tokenize words
+    # 3. Prepare Word Embedding
+    # there could be lines having a lot of words in them. But since we have to define the length of the sequene before hand
+    # and we already know that LSTM/GRU are slow due to their sequential nature, we will try to keep the sequence length as small as possible
+
+    # so, in the below snippet, we are calculating the frequencies of different sequence lengths
+    tokenized_lines = map(str.split, input_lines)
+    len_of_lines = map(len, tokenized_lines)
+    len_frequencies = Counter(list(len_of_lines))
+
+    # output the frequencies
+    sorted(len_frequencies.items())
+########################################################################
     sg_obj = SequenceGenerator(input_lines, target_lines, max_seq_len=12,
                            max_vocab_size=MAX_VOCAB_SIZE, embedding_dim=EMBEDDING_DIM)
 
@@ -429,28 +513,38 @@ if __name__=='__main__':
 # 6. generate a poem
     # 7. use the above two funcs to generate a poem
     # the theme of the poem - only single word (for simplicity)
-    query_word = "love"
+    query_word = max_topic
 
+    myfile = open("new_summer.txt", 'w')
+    all_100_poems = ""
+    counter = 1
     # to append the generated poem lines
-    poem_lines = []
+    for i in range(100):
+        print("i is ", i)
+        poem_lines = []
 
-    # first sequence containing only ones, this will be used to generate the context
-    sequences = []
+        # first sequence containing only ones, this will be used to generate the context
+        sequences = []
+        all_100_poems += ("Poem No." + str(counter) + "\n")
+        # we will be generating 8 lines, you can play around with this
+        for line_no in range(8):
 
-    # we will be generating 8 lines, you can play around with this
-    for line_no in range(8):
+            # get the context, for the first line the context will contain the embeddings of the theme words itself
+            context = get_context(sequences, query_word)
 
-        # get the context, for the first line the context will contain the embeddings of the theme words itself
-        context = get_context(sequences, query_word)
+            try:
+                # generate a new line and append it
+                sequences.append(get_sample_line(context))
+            except:
+                pass
+            sentence = " ".join(sequences[-1])
 
-        try:
-            # generate a new line and append it
-            sequences.append(get_sample_line(context))
-        except:
-            pass
+            poem_lines.append(sentence)
 
-        poem_lines.append(" ".join(sequences[-1]))
-
-    print("\n\n")
-    print("\n".join(poem_lines))
-
+        whole_poem = "\n".join(poem_lines)
+        all_100_poems += whole_poem
+        all_100_poems +="\n\n"
+        counter+=1
+    myfile.write(all_100_poems)
+        #print("\n\n")
+        #print("\n".join(poem_lines))
